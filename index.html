@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cup Search Task</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    background: #f3f1ec;
+    color: #222;
+    font-family: Arial, Helvetica, sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  body { display: flex; align-items: center; justify-content: center; }
+
+  .screen { display: none; width: 100%; max-width: 640px; padding: 24px 16px; text-align: center; }
+  .screen.active { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+
+  h1 { font-size: 1.7rem; }
+  h2 { font-size: 1.3rem; }
+  p  { font-size: 1.05rem; line-height: 1.6; }
+
+  .box {
+    background: #fff;
+    border: 1px solid #d8d4cb;
+    border-radius: 8px;
+    padding: 18px 22px;
+    width: 100%;
+    text-align: left;
+  }
+  .box p + p { margin-top: 10px; }
+
+  button {
+    padding: 12px 34px;
+    font-size: 1.05rem;
+    font-weight: bold;
+    background: #2f5d8a;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  button:hover { background: #244a6f; }
+  button:disabled { background: #9aa9b8; cursor: default; }
+
+  input[type=text] {
+    font-size: 1.1rem;
+    padding: 10px 12px;
+    width: 220px;
+    text-align: center;
+    border: 1px solid #b9b4a8;
+    border-radius: 6px;
+  }
+
+  .error { color: #b3261e; font-size: 0.95rem; min-height: 1.2em; }
+
+  /* Tier table */
+  table.tiers { border-collapse: collapse; margin: 6px auto 0; font-size: 1rem; }
+  table.tiers td { padding: 6px 18px; border-bottom: 1px solid #e3dfd6; }
+  table.tiers tr:last-child td { border-bottom: none; }
+  table.tiers td:first-child { font-weight: bold; text-align: left; }
+  table.tiers td:last-child { text-align: right; }
+  table.tiers tr.mine td { background: #fff4c7; }
+
+  /* Task screen */
+  #screen-task { max-width: none; padding: 8px 16px; gap: 6px; }
+  #hud, #field-wrap { width: min(94vw, calc((100vh - 80px) * 1.43)); }
+  #hud {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 1.15rem; font-weight: bold;
+  }
+  #progress-wrap { width: 40%; height: 8px; background: #ddd8cd; border-radius: 4px; overflow: hidden; }
+  #progress-bar  { height: 100%; width: 0%; background: #2f5d8a; }
+  #field-wrap { aspect-ratio: 700 / 490; touch-action: manipulation; }
+  #field { width: 100%; height: 100%; display: block; cursor: pointer; }
+  #layer-scene, #layer-feedback, #layer-debug, #layer-board { pointer-events: none; }
+  #debug-info { font-size: 0.85rem; color: #8a2a2a; min-height: 1.1em; }
+</style>
+</head>
+<body>
+
+<!-- ════════ WELCOME + PARTICIPANT ID ════════ -->
+<div id="screen-welcome" class="screen active">
+  <h1>Cup Search Task</h1>
+  <div class="box">
+    <p>Thank you for taking part in this study.</p>
+    <p>Please enter the participant ID you were given, then click <strong>Continue</strong>.</p>
+  </div>
+  <input type="text" id="subject-input" placeholder="e.g. P001" autocomplete="off">
+  <div class="error" id="subject-error"></div>
+  <button id="btn-id">Continue</button>
+</div>
+
+<!-- ════════ INSTRUCTIONS ════════ -->
+<div id="screen-instructions" class="screen">
+  <h2>Instructions</h2>
+  <div class="box">
+    <p>On each round you will see a table with 16 cups. Points are hidden under the cups.</p>
+    <p><strong>Click on a cup to lift it and look underneath.</strong> Each round ends on its own, and then a new round begins.</p>
+    <p>Your goal is to <strong>earn as many points as you can.</strong></p>
+    <p>The task takes about 10 minutes.</p>
+  </div>
+  <div class="box">
+    <h2 id="tier-heading-1" style="text-align:center;font-size:1.1rem;"></h2>
+    <table class="tiers" id="tier-table-1"></table>
+  </div>
+  <button id="btn-start">Start</button>
+</div>
+
+<!-- ════════ TASK ════════ -->
+<div id="screen-task" class="screen">
+  <div id="hud">
+    <span id="points-display">Points: 0</span>
+    <div id="progress-wrap"><div id="progress-bar"></div></div>
+  </div>
+  <div id="field-wrap">
+    <svg id="field" viewBox="0 0 700 490" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="cupGrad" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%"   stop-color="#2b4460"/>
+          <stop offset="30%"  stop-color="#5f80a6"/>
+          <stop offset="48%"  stop-color="#8fb0d2"/>
+          <stop offset="70%"  stop-color="#4f6f94"/>
+          <stop offset="100%" stop-color="#253c55"/>
+        </linearGradient>
+        <linearGradient id="tableGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"   stop-color="#c39d6b"/>
+          <stop offset="100%" stop-color="#e3c595"/>
+        </linearGradient>
+      </defs>
+      <g id="layer-board"></g>
+      <g id="layer-scene"></g>
+      <g id="layer-hit"></g>
+      <g id="layer-feedback"></g>
+      <g id="layer-debug"></g>
+    </svg>
+  </div>
+  <div id="debug-info"></div>
+</div>
+
+<!-- ════════ END ════════ -->
+<div id="screen-end" class="screen">
+  <h2>All done!</h2>
+  <div class="box">
+    <p id="end-score" style="text-align:center;font-size:1.25rem;"></p>
+  </div>
+  <div class="box">
+    <h2 id="tier-heading-2" style="text-align:center;font-size:1.1rem;"></h2>
+    <table class="tiers" id="tier-table-2"></table>
+  </div>
+  <p>Thank you for participating! Please let the researcher know you have finished.</p>
+  <button id="btn-download">Download data</button>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  SETTINGS — change these to adjust the experiment
+// ═══════════════════════════════════════════════════════════════
+const CONFIG = {
+  // Where the points are hidden relative to the landmark:
+  //   'exact' = replication of Stahlman & Blaisdell (2011): the landmark stands right
+  //             next to one cup, and the points are always under that cup.
+  //   'area'  = the landmark sits between four cups, and the points are under
+  //             one of those four (chosen at random each trial).
+  goalMode: 'exact',
+
+  // In 'exact' mode, which side of the goal cup the landmark stands on: 'right' or 'left'.
+  // It's always the same side, so the landmark–cup rule stays fixed (like the rats'
+  // "food is always just south of the landmark").
+  landmarkSide: 'right',
+
+  // Reward probability signaled by each landmark during the TEST phase.
+  hiProb: 1.0,
+  loProb: 0.2,
+
+  // Trial structure. Probabilities are applied exactly within each block,
+  // so (trials per block × probability) should be a whole number.
+  // 5 LO trials × 20% = exactly 1 rewarded LO trial per block.
+  // Training is OFF (blocks: 0). To add a Phase 1-style training phase, where both
+  // landmarks are reinforced 100% of the time, set blocks to 1 or more.
+  training: { blocks: 0, hiPerBlock: 4, loPerBlock: 4 },
+  test:     { blocks: 8, hiPerBlock: 5, loPerBlock: 5 },
+  maxSameTypeRun: 3,          // no more than 3 HI or 3 LO trials in a row
+
+  pointsPerReward: 10,
+
+  // Timing (milliseconds)
+  trialTimeoutMs: 20000,      // round ends if the goal cup isn't lifted within 20 s
+  searchLockoutMs: 400,       // after a cup click, further clicks are ignored for 400 ms
+  liftUpMs: 170,              // cup lift animation: rise ...
+  liftHoldMs: 300,            // ... stay up (so they can see the empty spot) ...
+  liftDownMs: 200,            // ... and lower back down
+  outcomeMs: 1300,            // how long the goal cup stays lifted at the end of a round
+  itiMs: 1000,                // empty table between rounds
+
+  // Points tier list shown before and after the task (edit names/cutoffs as needed).
+  // Max possible with the defaults: 40 HI + 8 LO rewards = 48 × 10 = 480.
+  // These cutoffs are placeholders — set them from pilot data.
+  tierHeading: 'How past participants scored',
+  tiers: [
+    { name: 'Gold',   min: 450 },
+    { name: 'Silver', min: 350 },
+    { name: 'Bronze', min: 0   },
+  ],
+};
+
+// URL options (for testing / counterbalancing):
+//   ?debug=1     short session, goal cup outlined, trial info shown
+//   ?cb=1        HI = orange triangle, LO = red rectangle (as in the paper's Figure 1)
+//   ?cb=2        HI = red rectangle,   LO = orange triangle
+//   ?mode=area   override goalMode
+const params = new URLSearchParams(window.location.search);
+const DEBUG = params.get('debug') === '1';
+if (params.get('mode') === 'area' || params.get('mode') === 'exact') CONFIG.goalMode = params.get('mode');
+if (DEBUG) {
+  CONFIG.training.blocks = Math.min(CONFIG.training.blocks, 1);
+  CONFIG.test.blocks = 2;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  GEOMETRY
+//  The task logic uses a flat 600 × 600 "ground" grid (as if seen from above):
+//  row 1 is the far/north row, column 1 is the left/west column.
+//  That ground is drawn as a tilted tabletop in a 700 × 490 scene.
+//  Xcord/Ycord in the data are click positions in the 700 × 490 scene.
+// ═══════════════════════════════════════════════════════════════
+const GRID = 4;
+const SPACING = 140;
+const OFFSET = 90;           // ground position of the first cup's center
+const cupU = c => OFFSET + c * SPACING;
+const cupV = r => OFFSET + r * SPACING;
+const cupID = (r, c) => `R${r + 1}C${c + 1}`;
+
+// Perspective: things further away (smaller v) are drawn smaller and higher up.
+const P = { cx: 350, yNear: 445, s: 0.95, alpha: 0.35, h: 0.85 };
+function project(u, v) {
+  const w = 1 + P.alpha * (600 - v) / 600;
+  return { x: P.cx + (u - 300) * P.s / w, y: P.yNear - (600 - v) * P.h / w, k: P.s / w };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════════
+const S = {
+  subject: '',
+  date: '',
+  counterbalance: null,     // 1 or 2
+  hiShape: '', loShape: '',
+  trials: [],
+  trialIndex: -1,
+  current: null,
+  sessionStart: null,
+  trialStart: null,
+  points: 0,
+  searchNum: 0,
+  bgClickNum: 0,
+  searched: new Set(),
+  acceptingInput: false,
+  lockedUntil: 0,
+  timeoutHandle: null,
+  rows: [],
+  finished: false,
+};
+window.__task = S;  // exposed for testing
+
+// ═══════════════════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════════════════
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function maxRun(seq) {
+  let best = 0, run = 0, prev = null;
+  for (const t of seq) {
+    run = (t.cue === prev) ? run + 1 : 1;
+    prev = t.cue;
+    best = Math.max(best, run);
+  }
+  return best;
+}
+
+function pad(n, w = 2) { return String(n).padStart(w, '0'); }
+
+function fmtSessionTime(ms) {
+  // H:MM:SS.ffffff
+  const totalUs = Math.round(ms * 1000);
+  const h = Math.floor(totalUs / 3.6e9);
+  const m = Math.floor((totalUs % 3.6e9) / 6e7);
+  const s = Math.floor((totalUs % 6e7) / 1e6);
+  const us = totalUs % 1e6;
+  return `${h}:${pad(m)}:${pad(s)}.${pad(us, 6)}`;
+}
+
+function todayString() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function svgEl(tag, attrs, parent) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(el);
+  return el;
+}
+
+const pts = arr => arr.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+
+// ═══════════════════════════════════════════════════════════════
+//  BUILD THE TRIAL SEQUENCE
+// ═══════════════════════════════════════════════════════════════
+function buildBlock(phase, block, nHi, nLo, hiProb, loProb, prevTrials) {
+  const nHiRew = Math.round(nHi * hiProb);
+  const nLoRew = Math.round(nLo * loProb);
+  const hiRew = shuffle([...Array(nHi)].map((_, i) => i < nHiRew));
+  const loRew = shuffle([...Array(nLo)].map((_, i) => i < nLoRew));
+
+  let blockTrials = [];
+  for (let i = 0; i < nHi; i++) blockTrials.push({ phase, block, cue: 'HI', prob: hiProb, rewarded: hiRew[i] });
+  for (let i = 0; i < nLo; i++) blockTrials.push({ phase, block, cue: 'LO', prob: loProb, rewarded: loRew[i] });
+
+  // Shuffle until no run (including the end of the previous block) exceeds the limit
+  const tail = prevTrials.slice(-CONFIG.maxSameTypeRun);
+  let attempts = 0;
+  do {
+    blockTrials = shuffle(blockTrials);
+    attempts++;
+  } while (maxRun(tail.concat(blockTrials)) > CONFIG.maxSameTypeRun && attempts < 5000);
+
+  return blockTrials;
+}
+
+function chooseLocation(prev, shape) {
+  // Returns the landmark's ground position and the goal cup for one trial.
+  // Avoids repeating the previous trial's goal cup.
+  let loc;
+  do {
+    if (CONFIG.goalMode === 'area') {
+      // Landmark at the center of a 2×2 group of cups; goal is one of the four.
+      const r0 = Math.floor(Math.random() * (GRID - 1));
+      const c0 = Math.floor(Math.random() * (GRID - 1));
+      const corners = [[r0, c0], [r0, c0 + 1], [r0 + 1, c0], [r0 + 1, c0 + 1]];
+      const [gr, gc] = corners[Math.floor(Math.random() * 4)];
+      loc = {
+        goalR: gr, goalC: gc,
+        lmU: cupU(c0) + SPACING / 2,
+        lmV: cupV(r0) + SPACING / 2,
+        area: corners.map(([r, c]) => cupID(r, c)).join('|'),
+      };
+    } else {
+      // Landmark standing right beside the goal cup (any of the 16 cups can be the goal).
+      // Its near edge sits just outside the cup's rim, so it's clearly closer to the
+      // goal cup than to the neighboring cup.
+      const gr = Math.floor(Math.random() * GRID);
+      const gc = Math.floor(Math.random() * GRID);
+      const side = CONFIG.landmarkSide === 'left' ? -1 : 1;
+      const halfW = LANDMARK_W[shape] / 2;
+      const offset = CUP.rBase + 4 + halfW;
+      loc = { goalR: gr, goalC: gc, lmU: cupU(gc) + side * offset, lmV: cupV(gr) + 1, area: cupID(gr, gc) };
+    }
+  } while (prev && prev.goalR === loc.goalR && prev.goalC === loc.goalC);
+  return loc;
+}
+
+function buildTrials() {
+  const all = [];
+  for (let b = 1; b <= CONFIG.training.blocks; b++) {
+    all.push(...buildBlock('training', b, CONFIG.training.hiPerBlock, CONFIG.training.loPerBlock, 1.0, 1.0, all));
+  }
+  for (let b = 1; b <= CONFIG.test.blocks; b++) {
+    all.push(...buildBlock('test', b, CONFIG.test.hiPerBlock, CONFIG.test.loPerBlock, CONFIG.hiProb, CONFIG.loProb, all));
+  }
+  let prev = null;
+  all.forEach((t, i) => {
+    t.trialNum = i + 1;
+    t.landmark = (t.cue === 'HI') ? S.hiShape : S.loShape;
+    Object.assign(t, chooseLocation(prev, t.landmark));
+    t.goalCup = cupID(t.goalR, t.goalC);
+    prev = t;
+  });
+  return all;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DATA LOGGING  (one row per event, pigeon-style columns)
+// ═══════════════════════════════════════════════════════════════
+const COLUMNS = [
+  'SessionTime', 'Xcord', 'Ycord', 'Event', 'TrialTime',
+  'TrialType', 'Cue', 'Landmark', 'Scheduled',
+  'CupID', 'IsGoal', 'Revisit', 'SearchNum', 'BackgroundClickNum',
+  'GoalCup', 'GoalArea', 'TrialNum', 'Block', 'Phase',
+  'Subject', 'Counterbalance', 'GoalMode', 'Date',
+];
+
+function logEvent(event, extra = {}) {
+  const now = performance.now();
+  const t = S.current;
+  S.rows.push({
+    SessionTime: fmtSessionTime(now - S.sessionStart),
+    Xcord: extra.x != null ? extra.x.toFixed(1) : 'NA',
+    Ycord: extra.y != null ? extra.y.toFixed(1) : 'NA',
+    Event: event,
+    TrialTime: ((now - S.trialStart) / 1000).toFixed(3),
+    TrialType: t ? Math.round((t.phase === 'training' ? 1.0 : t.prob) * 100) : 'NA',
+    Cue: t ? t.cue : 'NA',
+    Landmark: t ? t.landmark : 'NA',
+    Scheduled: t ? (t.rewarded ? 1 : 0) : 'NA',
+    CupID: extra.cup || 'NA',
+    IsGoal: extra.isGoal != null ? (extra.isGoal ? 1 : 0) : 'NA',
+    Revisit: extra.revisit != null ? (extra.revisit ? 1 : 0) : 'NA',
+    SearchNum: S.searchNum,
+    BackgroundClickNum: S.bgClickNum,
+    GoalCup: t ? t.goalCup : 'NA',
+    GoalArea: t ? t.area : 'NA',
+    TrialNum: t ? t.trialNum : 'NA',
+    Block: t ? t.block : 'NA',
+    Phase: t ? t.phase : 'NA',
+    Subject: S.subject,
+    Counterbalance: S.counterbalance,
+    GoalMode: CONFIG.goalMode,
+    Date: S.date,
+  });
+}
+
+function buildCSV() {
+  const clean = v => String(v).replace(/[,\n\r"]/g, '_');
+  const lines = [COLUMNS.join(',')];
+  for (const row of S.rows) lines.push(COLUMNS.map(c => clean(row[c])).join(','));
+  return lines.join('\n');
+}
+
+function downloadCSV() {
+  const blob = new Blob([buildCSV()], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${S.subject}_${S.date}_cupsearch.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DRAWING
+// ═══════════════════════════════════════════════════════════════
+const layerBoard = document.getElementById('layer-board');
+const layerScene = document.getElementById('layer-scene');
+const layerHit = document.getElementById('layer-hit');
+const layerFB = document.getElementById('layer-feedback');
+const layerDebug = document.getElementById('layer-debug');
+let CUPS = {};   // cupID -> { x, y, k, body, shadow, under, lift }
+
+// Cup shape (in units scaled by k): an upside-down cup sitting on the table
+const CUP = { rBase: 40, ryBase: 15, rTop: 28, ryTop: 11, height: 48, lift: 50 };
+const LANDMARK_W = { rectangle: 16, triangle: 30 };   // landmark widths (ground units)
+
+function drawBoard() {
+  layerBoard.innerHTML = '';
+  const m = 25;
+  const FL = project(-m, -m), FR = project(600 + m, -m);
+  const NL = project(-m, 600 + m), NR = project(600 + m, 600 + m);
+  const fl = [FL.x, FL.y], fr = [FR.x, FR.y], nl = [NL.x, NL.y], nr = [NR.x, NR.y];
+  // front edge of the table (thickness)
+  svgEl('polygon', { points: pts([nl, nr, [nr[0], nr[1] + 16], [nl[0], nl[1] + 16]]), fill: '#8f6a3c' }, layerBoard);
+  // table top
+  svgEl('polygon', { points: pts([fl, fr, nr, nl]), fill: 'url(#tableGrad)', stroke: '#8f6a3c', 'stroke-width': 2 }, layerBoard);
+}
+
+function cupPath(x, y, k) {
+  const rb = CUP.rBase * k, ryb = CUP.ryBase * k, rt = CUP.rTop * k, ryt = CUP.ryTop * k, H = CUP.height * k;
+  return `M ${x - rb} ${y} L ${x - rt} ${y - H} A ${rt} ${ryt} 0 0 1 ${x + rt} ${y - H} ` +
+         `L ${x + rb} ${y} A ${rb} ${ryb} 0 0 1 ${x - rb} ${y} Z`;
+}
+
+function drawCup(id, u, v) {
+  const { x, y, k } = project(u, v);
+  const g = svgEl('g', {}, layerScene);
+  // the spot under the cup (seen when it's lifted)
+  svgEl('ellipse', { cx: x, cy: y, rx: 31 * k, ry: 10 * k, fill: '#000', 'fill-opacity': 0.12 }, g);
+  const shadow = svgEl('ellipse', { cx: x + 5 * k, cy: y + 3 * k, rx: 46 * k, ry: 14 * k, fill: '#000', 'fill-opacity': 0.22 }, g);
+  const under = svgEl('g', {}, g);   // coin goes here when revealed
+  const body = svgEl('g', {}, g);
+  svgEl('path', { d: cupPath(x, y, k), fill: 'url(#cupGrad)', stroke: '#1f3349', 'stroke-width': 1.5 }, body);
+  // rim band near the bottom
+  svgEl('path', {
+    d: `M ${x - (CUP.rBase - 3) * k} ${y - 7 * k} A ${(CUP.rBase - 3) * k} ${(CUP.ryBase - 1) * k} 0 0 0 ${x + (CUP.rBase - 3) * k} ${y - 7 * k}`,
+    fill: 'none', stroke: '#b3cae3', 'stroke-width': 2.2 * k, 'stroke-opacity': 0.75,
+  }, body);
+  // top (the cup's closed bottom)
+  svgEl('ellipse', { cx: x, cy: y - CUP.height * k, rx: CUP.rTop * k, ry: CUP.ryTop * k, fill: '#58779a', stroke: '#1f3349', 'stroke-width': 1.5 }, body);
+
+  // invisible click target that stays put while the cup lifts
+  svgEl('path', { d: cupPath(x, y, k), fill: 'transparent', 'pointer-events': 'all', 'data-cup': id }, layerHit);
+
+  CUPS[id] = { x, y, k, body, shadow, under, lift: 0 };
+}
+
+function drawLandmark(shape, u, v) {
+  const { x, y, k } = project(u, v);
+  const H = 64 * k;                  // taller than the cups so it's always visible
+  const off = [5 * k, -4 * k];       // depth direction of the block (back = up-right)
+  let front, colors;
+  if (shape === 'rectangle') {
+    // red rectangular block (as in Figure 1, bottom panel)
+    const W = LANDMARK_W.rectangle * k;
+    front = [[x - W / 2, y - H], [x + W / 2, y - H], [x + W / 2, y], [x - W / 2, y]];
+    colors = { front: '#c62828', side: '#871b1b', top: '#e35a5a', edge: '#5e1010' };
+  } else {
+    // orange right-triangle block (as in Figure 1, top panel)
+    const W = LANDMARK_W.triangle * k;
+    front = [[x + W / 2, y - H], [x + W / 2, y], [x - W / 2, y]];
+    colors = { front: '#f08a1c', side: '#b5600b', top: '#f7a952', edge: '#7a4106' };
+  }
+
+  const g = svgEl('g', {}, layerScene);
+  const hit = svgEl('g', { 'data-landmark': '1', 'pointer-events': 'all' }, layerHit);
+  svgEl('ellipse', { cx: x + 8 * k, cy: y + 2 * k, rx: 26 * k, ry: 7 * k, fill: '#000', 'fill-opacity': 0.2 }, g);
+
+  // Draw only the side faces that face the viewer, then the front face.
+  for (let i = 0; i < front.length; i++) {
+    const a = front[i], b = front[(i + 1) % front.length];
+    const n = [b[1] - a[1], -(b[0] - a[0])];          // outward normal (clockwise polygon)
+    if (n[0] * off[0] + n[1] * off[1] <= 0) continue; // faces away from viewer
+    const quad = [a, b, [b[0] + off[0], b[1] + off[1]], [a[0] + off[0], a[1] + off[1]]];
+    const isTop = Math.abs(n[1]) > Math.abs(n[0]) && n[1] < 0;
+    svgEl('polygon', { points: pts(quad), fill: isTop ? colors.top : colors.side, stroke: colors.edge, 'stroke-width': 1 }, g);
+    svgEl('polygon', { points: pts(quad), fill: 'transparent' }, hit);
+  }
+  svgEl('polygon', { points: pts(front), fill: colors.front, stroke: colors.edge, 'stroke-width': 1.2 }, g);
+  svgEl('polygon', { points: pts(front), fill: 'transparent' }, hit);
+}
+
+// Draw cups and landmark from back to front so nearer objects overlap farther ones.
+function drawScene(t) {
+  const items = [];
+  for (let r = 0; r < GRID; r++)
+    for (let c = 0; c < GRID; c++)
+      items.push({ v: cupV(r), draw: () => drawCup(cupID(r, c), cupU(c), cupV(r)) });
+  items.push({ v: t.lmV, draw: () => drawLandmark(t.landmark, t.lmU, t.lmV) });
+  items.sort((a, b) => a.v - b.v).forEach(it => it.draw());
+}
+
+function clearScene() {
+  layerScene.innerHTML = '';
+  layerHit.innerHTML = '';
+  layerFB.innerHTML = '';
+  layerDebug.innerHTML = '';
+  CUPS = {};
+}
+
+// ── Lift animation ──
+const ease = t => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+
+function setLift(cup, p) {
+  const L = CUP.lift * cup.k;
+  const pivotX = cup.x + CUP.rBase * cup.k;
+  cup.body.setAttribute('transform', `translate(0 ${(-L * p).toFixed(2)}) rotate(${(8 * p).toFixed(2)} ${pivotX.toFixed(1)} ${cup.y.toFixed(1)})`);
+  cup.shadow.setAttribute('fill-opacity', (0.22 * (1 - 0.6 * p)).toFixed(3));
+  cup.lift = p;
+}
+
+function liftCup(id, stayUp) {
+  const cup = CUPS[id];
+  if (!cup) return;
+  cup.token = (cup.token || 0) + 1;
+  const token = cup.token, from = cup.lift, start = performance.now();
+  const up = CONFIG.liftUpMs, hold = CONFIG.liftHoldMs, down = CONFIG.liftDownMs;
+  function frame(now) {
+    if (CUPS[id] !== cup || cup.token !== token) return;   // cup was redrawn or re-lifted
+    const t = now - start;
+    let p;
+    if (t < up) p = from + (1 - from) * ease(t / up);
+    else if (stayUp) { setLift(cup, 1); return; }
+    else if (t < up + hold) p = 1;
+    else if (t < up + hold + down) p = 1 - ease((t - up - hold) / down);
+    else { setLift(cup, 0); return; }
+    setLift(cup, p);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+function showCoin(id) {
+  const cup = CUPS[id];
+  const { x, y, k } = cup;
+  svgEl('ellipse', { cx: x, cy: y - 1 * k, rx: 18 * k, ry: 7 * k, fill: '#9c7400' }, cup.under);
+  svgEl('ellipse', { cx: x, cy: y - 4 * k, rx: 18 * k, ry: 7 * k, fill: '#f2c230', stroke: '#a77c00', 'stroke-width': 1.5 }, cup.under);
+  const txt = svgEl('text', {
+    x, y: y - (CUP.lift + CUP.height) * k - 16, 'text-anchor': 'middle', 'font-size': 30, 'font-weight': 'bold',
+    fill: '#1f7a2e', stroke: '#fff', 'stroke-width': 4, 'paint-order': 'stroke', 'font-family': 'Arial, sans-serif',
+  }, layerFB);
+  txt.textContent = `+${CONFIG.pointsPerReward}`;
+}
+
+function updateHUD() {
+  document.getElementById('points-display').textContent = `Points: ${S.points}`;
+  const pct = 100 * Math.max(0, S.trialIndex) / S.trials.length;
+  document.getElementById('progress-bar').style.width = pct + '%';
+}
+
+function renderTierTable(tableId, headingId, myTier) {
+  document.getElementById(headingId).textContent = CONFIG.tierHeading;
+  const table = document.getElementById(tableId);
+  table.innerHTML = '';
+  CONFIG.tiers.forEach((tier, i) => {
+    const upper = i === 0 ? null : CONFIG.tiers[i - 1].min - 1;
+    const range = upper == null ? `${tier.min}+ points` : `${tier.min}–${upper} points`;
+    const tr = document.createElement('tr');
+    if (myTier && myTier.name === tier.name) tr.className = 'mine';
+    tr.innerHTML = `<td>${tier.name}</td><td>${range}</td>`;
+    table.appendChild(tr);
+  });
+}
+
+function tierFor(points) {
+  return CONFIG.tiers.find(t => points >= t.min) || CONFIG.tiers[CONFIG.tiers.length - 1];
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  TRIAL FLOW
+// ═══════════════════════════════════════════════════════════════
+function startTrial() {
+  S.trialIndex++;
+  if (S.trialIndex >= S.trials.length) { finishSession(); return; }
+
+  const t = S.current = S.trials[S.trialIndex];
+  S.searchNum = 0;
+  S.bgClickNum = 0;
+  S.searched = new Set();
+  S.lockedUntil = 0;
+
+  clearScene();
+  drawScene(t);
+  updateHUD();
+
+  if (DEBUG) {
+    const g = CUPS[t.goalCup];
+    svgEl('ellipse', { cx: g.x, cy: g.y, rx: (CUP.rBase + 8) * g.k, ry: (CUP.ryBase + 6) * g.k, fill: 'none', stroke: '#d00', 'stroke-width': 2, 'stroke-dasharray': '6 4' }, layerDebug);
+    document.getElementById('debug-info').textContent =
+      `Trial ${t.trialNum}/${S.trials.length} | ${t.phase} block ${t.block} | cue ${t.cue} (${t.landmark}) | scheduled ${t.rewarded ? 'reward' : 'no reward'} | goal ${t.goalCup}`;
+  }
+
+  S.trialStart = performance.now();
+  logEvent('trial_start');
+  S.acceptingInput = true;
+  S.timeoutHandle = setTimeout(() => endTrial('timeout'), CONFIG.trialTimeoutMs);
+}
+
+function svgPoint(evt) {
+  const svg = document.getElementById('field');
+  const pt = svg.createSVGPoint();
+  pt.x = evt.clientX; pt.y = evt.clientY;
+  return pt.matrixTransform(svg.getScreenCTM().inverse());
+}
+
+function handleFieldPointer(evt) {
+  if (!S.acceptingInput) return;
+  if (evt.pointerType === 'mouse' && evt.button !== 0) return;
+  evt.preventDefault();
+
+  const now = performance.now();
+  if (now < S.lockedUntil) return;   // still in the lockout from the last cup lift
+
+  const p = svgPoint(evt);
+  const t = S.current;
+  const target = evt.target.closest ? evt.target.closest('[data-cup],[data-landmark]') : null;
+
+  if (!target || target.hasAttribute('data-landmark')) {
+    S.bgClickNum++;
+    logEvent(target ? 'landmark_click' : 'background_click', { x: p.x, y: p.y });
+    return;
+  }
+
+  const id = target.getAttribute('data-cup');
+  const isGoal = (id === t.goalCup);
+  const revisit = S.searched.has(id);
+  S.searched.add(id);
+  S.searchNum++;
+  S.lockedUntil = now + CONFIG.searchLockoutMs;
+  logEvent('cup_search', { x: p.x, y: p.y, cup: id, isGoal, revisit });
+
+  if (isGoal) {
+    endTrial('goal');
+  } else {
+    liftCup(id, false);
+  }
+}
+
+function endTrial(how) {
+  if (!S.acceptingInput) return;
+  S.acceptingInput = false;
+  clearTimeout(S.timeoutHandle);
+
+  const t = S.current;
+  if (how === 'timeout') {
+    logEvent('timeout_trial');
+  } else {
+    if (t.rewarded) {
+      S.points += CONFIG.pointsPerReward;
+      showCoin(t.goalCup);
+      logEvent('reinforced_trial');
+    } else {
+      logEvent('nonreinforced_trial');
+    }
+    liftCup(t.goalCup, true);
+  }
+  updateHUD();
+
+  setTimeout(() => {
+    clearScene();                       // empty table during the inter-trial interval
+    setTimeout(startTrial, CONFIG.itiMs);
+  }, how === 'timeout' ? 0 : CONFIG.outcomeMs);
+}
+
+function finishSession() {
+  S.finished = true;
+  S.current = null;
+  S.trialIndex = S.trials.length;
+  updateHUD();
+  const myTier = tierFor(S.points);
+  document.getElementById('end-score').innerHTML =
+    `You earned <strong>${S.points} points</strong> — <strong>${myTier.name}</strong> tier!`;
+  renderTierTable('tier-table-2', 'tier-heading-2', myTier);
+  showScreen('screen-end');
+  downloadCSV();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SETUP
+// ═══════════════════════════════════════════════════════════════
+function submitID() {
+  const val = document.getElementById('subject-input').value.trim();
+  if (!val) { document.getElementById('subject-error').textContent = 'Please enter your participant ID.'; return; }
+  S.subject = val.replace(/[^A-Za-z0-9_-]/g, '_');
+  S.date = todayString();
+
+  const cbParam = params.get('cb');
+  S.counterbalance = (cbParam === '1' || cbParam === '2') ? Number(cbParam) : (Math.random() < 0.5 ? 1 : 2);
+  S.hiShape = S.counterbalance === 1 ? 'triangle' : 'rectangle';
+  S.loShape = S.counterbalance === 1 ? 'rectangle' : 'triangle';
+
+  S.trials = buildTrials();
+  renderTierTable('tier-table-1', 'tier-heading-1', null);
+  showScreen('screen-instructions');
+}
+
+document.getElementById('btn-id').addEventListener('click', submitID);
+document.getElementById('subject-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitID(); });
+
+document.getElementById('btn-start').addEventListener('click', () => {
+  showScreen('screen-task');
+  S.sessionStart = performance.now();
+  S.trialStart = S.sessionStart;
+  logEvent('session_start');
+  setTimeout(startTrial, 600);
+});
+
+document.getElementById('btn-download').addEventListener('click', downloadCSV);
+document.getElementById('field').addEventListener('pointerdown', handleFieldPointer);
+
+drawBoard();
+
+window.addEventListener('beforeunload', e => {
+  if (S.sessionStart && !S.finished) { e.preventDefault(); e.returnValue = ''; }
+});
+</script>
+</body>
+</html>
