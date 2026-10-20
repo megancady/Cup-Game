@@ -103,7 +103,7 @@
     <p>On each round you will see a table with 16 cups. Points are hidden under the cups.</p>
     <p><strong>Click on a cup to lift it and look underneath.</strong> Each round ends on its own, and then a new round begins.</p>
     <p>Your goal is to <strong>earn as many points as you can.</strong></p>
-    <p>The task takes about 10 minutes.</p>
+    <p id="duration-text">The task takes about 10 minutes.</p>
   </div>
   <div class="box">
     <h2 id="tier-heading-1" style="text-align:center;font-size:1.1rem;"></h2>
@@ -183,14 +183,20 @@ const CONFIG = {
   // 5 LO trials × 20% = exactly 1 rewarded LO trial per block.
   // Training is OFF (blocks: 0). To add a Phase 1-style training phase, where both
   // landmarks are reinforced 100% of the time, set blocks to 1 or more.
+  // Number of TEST rounds = blocks × 10. 5 blocks = 50 rounds (≈10 min with roundLengthMs = 12 s).
   training: { blocks: 0, hiPerBlock: 4, loPerBlock: 4 },
-  test:     { blocks: 8, hiPerBlock: 5, loPerBlock: 5 },
+  test:     { blocks: 5, hiPerBlock: 5, loPerBlock: 5 },
   maxSameTypeRun: 3,          // no more than 3 HI or 3 LO trials in a row
 
   pointsPerReward: 10,
 
   // Timing (milliseconds)
-  trialTimeoutMs: 20000,      // round ends if the goal cup isn't lifted within 20 s
+  // Every round takes this long in total (searching + outcome + wait before the next round),
+  // no matter how quickly the participant lifts the landmark cup. This removes any incentive
+  // to rush through: going straight to the landmark cup does NOT make the task end sooner.
+  // Set to 0 to let each round move on as soon as the outcome has been shown.
+  roundLengthMs: 12000,
+  trialTimeoutMs: 10000,      // round ends if the goal cup isn't lifted within 10 s
   searchLockoutMs: 400,       // after a cup click, further clicks are ignored for 400 ms
   liftUpMs: 170,              // cup lift animation: rise ...
   liftHoldMs: 300,            // ... stay up (so they can see the empty spot) ...
@@ -199,12 +205,12 @@ const CONFIG = {
   itiMs: 1000,                // empty table between rounds
 
   // Points tier list shown before and after the task (edit names/cutoffs as needed).
-  // Max possible with the defaults: 40 HI + 8 LO rewards = 48 × 10 = 480.
+  // Max possible with the defaults: 25 HI + 5 LO rewards = 30 × 10 = 300.
   // These cutoffs are placeholders — set them from pilot data.
   tierHeading: 'How past participants scored',
   tiers: [
-    { name: 'Gold',   min: 450 },
-    { name: 'Silver', min: 350 },
+    { name: 'Gold',   min: 280 },
+    { name: 'Silver', min: 220 },
     { name: 'Bronze', min: 0   },
   ],
 };
@@ -723,8 +729,22 @@ function endTrial(how) {
   updateHUD();
 
   setTimeout(() => {
-    clearScene();                       // empty table during the inter-trial interval
-    setTimeout(startTrial, CONFIG.itiMs);
+    clearScene();                       // empty table between rounds
+    let wait = CONFIG.itiMs;
+    if (CONFIG.roundLengthMs > 0) {
+      // pad the wait so every round takes the same total time
+      const used = performance.now() - S.trialStart;
+      wait = Math.max(CONFIG.itiMs, CONFIG.roundLengthMs - used);
+    }
+    if (S.trialIndex < S.trials.length - 1) {
+      const c = project(300, 300);
+      const msg = svgEl('text', {
+        x: c.x, y: c.y, 'text-anchor': 'middle', 'font-size': 22, fill: '#6b5233',
+        'font-family': 'Arial, sans-serif',
+      }, layerFB);
+      msg.textContent = 'Next round starting soon…';
+    }
+    setTimeout(startTrial, wait);
   }, how === 'timeout' ? 0 : CONFIG.outcomeMs);
 }
 
@@ -757,6 +777,16 @@ function submitID() {
 
   S.trials = buildTrials();
   renderTierTable('tier-table-1', 'tier-heading-1', null);
+
+  // Tell participants how long the task takes (and, if rounds are fixed-length,
+  // that rushing won't make it end sooner).
+  const durText = document.getElementById('duration-text');
+  if (CONFIG.roundLengthMs > 0) {
+    const mins = Math.max(1, Math.round(S.trials.length * CONFIG.roundLengthMs / 60000));
+    durText.innerHTML = `Every round lasts the same amount of time, so the task takes about <strong>${mins} minutes</strong> no matter how quickly you go.`;
+  } else {
+    durText.textContent = 'The task takes about 10 minutes.';
+  }
   showScreen('screen-instructions');
 }
 
